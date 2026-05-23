@@ -1,0 +1,54 @@
+# Secrets — never commit
+.env
+.env.local
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Build artifacts
+dist/
+build/
+*.egg
+out/
+
+# Scan + benchmark output (may contain hashes of private files)
+reports/
+benchmarks/
+samples/
+
+# Test corpus — contains REAL MALWARE; never push to a public repo
+corpus/
+eicar.com
+**/mal_*.exe
+**/mal_*.dll
+
+# Node / Electron (UI subdir has its own .gitignore but cover here too)
+node_modules/
+ui/out/
+ui/dist/
+ui/release/
+
+# Ghidra
+.ghidra/
+ghidra_*/
+
+# OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# IDEs
+.vscode/
+.idea/
+*.iml

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sentinel"
+version = "0.1.0"
+description = "Guilty-until-proven-innocent file scanner: VirusTotal -> Triage -> AI/Ghidra"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+    "rich>=13.7",
+    "python-dotenv>=1.0",
+    "pydantic>=2.5",
+    "pyzipper>=0.3",
+    "flask>=3.0",
+    "flask-cors>=4.0",
+]
+
+[project.scripts]
+sentinel = "sentinel.cli:main"
+
+[tool.setuptools]
+packages = ["sentinel", "sentinel.stages", "sentinel.llm"]
+
+[tool.setuptools.package-data]
+sentinel = ["ghidra_scripts/*.py"]
