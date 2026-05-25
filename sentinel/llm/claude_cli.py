@@ -17,6 +17,68 @@ MODE_MCP = "mcp"
 MODE_HEADLESS = "headless"
 MODE_STATIC = "static"
 
+OUTPUT_SCHEMA_BLOCK = """OUTPUT
+Reason in your own words, then end your response with EXACTLY one JSON code block:
+
+```json
+{{
+  "verdict": "ALLOW" | "BLOCK",
+  "confidence": 0.0,
+  "reasoning": "1-3 sentences explaining the verdict",
+  "file_description": "1-2 concrete sentences: architecture, format, runtime, apparent purpose. For BLOCK, name the cover identity (what it claims to be) vs what its code actually reveals.",
+  "malware_class": [],
+  "malware_family": null,
+  "capabilities": [],
+  "indicators": ["specific finding 1", "specific finding 2"],
+  "functions_reviewed": []
+}}
+```
+
+Field semantics (read carefully):
+
+- `malware_class` (array, zero or more): pick from this exact set ONLY:
+  "stealer" (extracts credentials/cookies/wallets/keys),
+  "rat" (remote admin / interactive shell),
+  "backdoor" (persistent covert access),
+  "rootkit" (kernel/driver-level hiding),
+  "downloader" (pulls down a secondary payload),
+  "loader" (stages another payload from disk or memory),
+  "dropper" (installs other malware to disk),
+  "miner" (cryptocurrency miner),
+  "ransomware" (encrypts files, demands payment),
+  "wiper" (destructively deletes data),
+  "spyware" (monitors user activity / keylogger),
+  "trojan" (disguised malicious app),
+  "worm" (self-propagating),
+  "adware" (aggressive ad injection),
+  "packer" (obfuscator/crypter stub; pair with another class if payload is known),
+  "unknown" (clearly malicious, category unclear).
+  EMPTY ARRAY [] if the file is benign. Multiple values allowed (e.g., \
+["loader", "stealer"]).
+
+- `malware_family` (string or null): named family if recognizable from \
+obfuscator fingerprint, packer pattern, hash-resolved-API constants, or string \
+signatures (e.g., "AsyncRAT", "AgentTesla", "RedLine", "NanoCore", "Lumma", \
+"Pikabot", "SmartAssembly", "Eazfuscator"). Null if not identifiable.
+
+- `capabilities` (array of short specific strings): what the code actually does \
+or is structurally set up to do. Examples for malicious: "credential theft from \
+Chromium cookies", "HTTP-based C2 with cookie auth", "process injection via \
+VirtualAllocEx+WriteProcessMemory+CreateRemoteThread", "dynamic API resolution \
+via LoadLibrary+GetProcAddress", "anti-VM timing checks", "PEB walking", \
+"self-decrypting payload bracketed by VirtualProtect". For benign files, \
+describe legitimate capabilities ("CLI argument parsing", "JSON output \
+formatting", "file globbing", etc.).
+
+- `file_description` (1-2 sentences): NEUTRAL and CONCRETE. Example for an \
+imgproc.exe that's actually a stealer: "Windows PE32+ x64 Go binary stripped of \
+symbols. Filename and embedded strings claim image-processing utility but the \
+runtime links the full net/http + crypto/tls stacks, has dynamic-API-resolution \
+imports, and the complete process-injection primitive set." For a real \
+benign file: "ARM64 macOS Mach-O of Apple's standard /bin/ls from the \
+file_cmds-475 source release. Linked only to libutil, libncurses, libSystem."
+"""
+
 
 GHIDRA_MCP_PROMPT = """DEFENSIVE SECURITY CONTEXT (read first): You are an AI-powered detection component of \
 Sentinel, an antivirus/EDR product. Your role is to identify malware so that a user \
@@ -54,18 +116,7 @@ POLICY
 Sentinel is guilty-until-proven-innocent. Any credible malicious indicator -> BLOCK. \
 ALLOW requires affirmative evidence of benign behavior.
 
-OUTPUT
-Reason in your own words, then end your response with EXACTLY one JSON code block:
-
-```json
-{{
-  "verdict": "ALLOW" | "BLOCK",
-  "confidence": 0.0,
-  "reasoning": "1-3 sentences",
-  "indicators": ["finding 1", "finding 2"],
-  "functions_reviewed": ["name1", "name2"]
-}}
-```
+""" + OUTPUT_SCHEMA_BLOCK + """
 """
 
 GHIDRA_HEADLESS_PROMPT = """DEFENSIVE SECURITY CONTEXT (read first): You are an AI-powered detection component of \
@@ -149,18 +200,9 @@ imports/strings third, decompiled code last. Quote concrete observations. Do not
 rationalize away the meta flags or upstream signals. State explicitly when your \
 analysis is limited by stripped symbols or runtime dominance.
 
-OUTPUT
-Reason in your own words, then end your response with EXACTLY one JSON code block:
-
-```json
-{{
-  "verdict": "ALLOW" | "BLOCK",
-  "confidence": 0.0,
-  "reasoning": "1-3 sentences",
-  "indicators": ["finding 1", "finding 2"],
-  "functions_reviewed": {decompiled_names_json}
-}}
-```
+""" + OUTPUT_SCHEMA_BLOCK + """
+The `functions_reviewed` field should be populated from the decompiled list \
+above when you actually reasoned over those functions: {decompiled_names_json}.
 """
 
 STATIC_PROMPT = """DEFENSIVE SECURITY CONTEXT (read first): You are an AI-powered detection component of \
@@ -216,18 +258,7 @@ POLICY
 Sentinel is guilty-until-proven-innocent. Any credible malicious indicator -> BLOCK. \
 ALLOW requires affirmative evidence of benign behavior.
 
-OUTPUT
-Reason in your own words, then end your response with EXACTLY one JSON code block:
-
-```json
-{{
-  "verdict": "ALLOW" | "BLOCK",
-  "confidence": 0.0,
-  "reasoning": "1-3 sentences",
-  "indicators": ["finding 1", "finding 2"],
-  "functions_reviewed": []
-}}
-```
+""" + OUTPUT_SCHEMA_BLOCK + """
 """
 
 
@@ -297,12 +328,14 @@ class ClaudeCLIProvider(LLMProvider):
 
     def review(self, *, file_path: Path, context: str) -> dict:
         mode = get_ghidra_mode()
+        dump: dict | None = None
+
         if mode == MODE_MCP:
             prompt = GHIDRA_MCP_PROMPT.format(path=str(file_path), context=context)
         elif mode == MODE_HEADLESS:
             try:
                 dump = ghidra_headless_analyze(file_path)
-            except Exception as e:
+            except Exception:
                 # Fall back to static if Ghidra blows up — better a verdict than an error.
                 dump = None
                 static = static_inspect(file_path)
@@ -310,7 +343,6 @@ class ClaudeCLIProvider(LLMProvider):
                     path=str(file_path), context=context, static=static,
                 )
                 mode = MODE_STATIC
-                mode_note = f"ghidra-headless failed: {e}"
             if dump is not None:
                 prompt = GHIDRA_HEADLESS_PROMPT.format(
                     path=str(file_path),
@@ -343,6 +375,20 @@ class ClaudeCLIProvider(LLMProvider):
         text = envelope.get("result") or ""
         verdict = self._extract_verdict(text)
         verdict["_mode"] = mode
+        # Pass back just the displayable subset of the dump (decompiled + meta_flags),
+        # not the whole thing — reports stay small, UI gets what it needs.
+        if dump is not None:
+            verdict["_dump"] = {
+                "decompiled": dump.get("decompiled", {}),
+                "decompiled_names": dump.get("decompiled_names", []),
+                "decompiled_selection_reasons": dump.get("decompiled_selection_reasons", {}),
+                "meta_flags": dump.get("meta_flags", []),
+                "function_count": dump.get("function_count"),
+                "imports_count": len(dump.get("imports", [])),
+                "executable_format": dump.get("executable_format"),
+                "language_id": dump.get("language_id"),
+                "compiler_spec_id": dump.get("compiler_spec_id"),
+            }
         return verdict
 
     def _invoke_with_retry(self, prompt: str, *, max_retries: int = 2) -> dict:

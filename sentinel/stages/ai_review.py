@@ -32,22 +32,39 @@ def scan(file_path: Path, prior_signals: list[Signal], provider: LLMProvider) ->
     indicators = result.get("indicators") or []
     mode = result.get("_mode", "unknown")
 
+    # New AI fields
+    file_description = result.get("file_description") or ""
+    malware_class = result.get("malware_class") or []
+    malware_family = result.get("malware_family")
+    capabilities = result.get("capabilities") or []
+
     mode_tag = f"({mode}) "
     summary = mode_tag + (reasoning[:160] if reasoning else f"verdict={raw_verdict or 'unparsed'}")
+
+    evidence: dict = {
+        "mode": mode,
+        "verdict": raw_verdict,
+        "confidence": confidence,
+        "reasoning": reasoning,
+        "indicators": indicators,
+        "functions_reviewed": result.get("functions_reviewed", []),
+        "file_description": file_description,
+        "malware_class": malware_class,
+        "malware_family": malware_family,
+        "capabilities": capabilities,
+    }
+    # Headless mode includes the Ghidra dump (decompiled + meta_flags) so the
+    # UI can render the actual code Claude reviewed.
+    dump = result.get("_dump")
+    if dump:
+        evidence["ghidra_dump"] = dump
 
     return Signal(
         stage="ai_review",
         verdict=verdict,
         score=float(confidence) if isinstance(confidence, (int, float)) else None,
         summary=summary,
-        evidence={
-            "mode": mode,
-            "verdict": raw_verdict,
-            "confidence": confidence,
-            "reasoning": reasoning,
-            "indicators": indicators,
-            "functions_reviewed": result.get("functions_reviewed", []),
-        },
+        evidence=evidence,
         duration_seconds=time.monotonic() - start,
     )
 

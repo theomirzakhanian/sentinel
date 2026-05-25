@@ -121,6 +121,41 @@ def create_app() -> Flask:
     def health():
         return jsonify({"status": "ok", "version": __version__})
 
+    @app.get("/settings")
+    def get_settings():
+        import os
+        from sentinel.verdict import BLOCK_THRESHOLD
+        from sentinel.llm.claude_cli import get_ghidra_mode
+        from sentinel.ghidra_headless import find_analyze_headless
+
+        def masked(name: str) -> str | None:
+            v = os.environ.get(name) or ""
+            if not v:
+                return None
+            if len(v) <= 8:
+                return "••••"
+            return v[:4] + "•" * 12 + v[-4:]
+
+        env_file = Path(".env").resolve()
+        return jsonify({
+            "version": __version__,
+            "ai_mode": get_ghidra_mode(),
+            "block_threshold": BLOCK_THRESHOLD,
+            "env_file": str(env_file),
+            "env_file_exists": env_file.is_file(),
+            "keys": {
+                "VT_API_KEY": masked("VT_API_KEY"),
+                "TRIAGE_API_KEY": masked("TRIAGE_API_KEY"),
+                "MALWAREBAZAAR_API_KEY": masked("MALWAREBAZAAR_API_KEY"),
+            },
+            "engine": {
+                "claude_bin": os.environ.get("SENTINEL_CLAUDE_BIN") or "claude",
+                "claude_model": os.environ.get("SENTINEL_CLAUDE_MODEL") or None,
+                "ghidra_home": os.environ.get("GHIDRA_HOME"),
+                "analyze_headless_path": find_analyze_headless(),
+            },
+        })
+
     @app.post("/scan")
     def post_scan():
         data = request.get_json(silent=True) or {}

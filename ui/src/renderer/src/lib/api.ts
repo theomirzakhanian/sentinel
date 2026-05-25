@@ -28,6 +28,32 @@ export async function baseUrl(): Promise<string> {
   throw new Error(r.error || "daemon unreachable");
 }
 
+export interface DaemonSettings {
+  version: string;
+  ai_mode: "mcp" | "headless" | "static";
+  block_threshold: number;
+  env_file: string;
+  env_file_exists: boolean;
+  keys: {
+    VT_API_KEY: string | null;
+    TRIAGE_API_KEY: string | null;
+    MALWAREBAZAAR_API_KEY: string | null;
+  };
+  engine: {
+    claude_bin: string;
+    claude_model: string | null;
+    ghidra_home: string | null;
+    analyze_headless_path: string | null;
+  };
+}
+
+export async function fetchSettings(): Promise<DaemonSettings> {
+  const base = await baseUrl();
+  const r = await fetch(`${base}/settings`);
+  if (!r.ok) throw new Error(`settings: HTTP ${r.status}`);
+  return (await r.json()) as DaemonSettings;
+}
+
 export async function fetchHistory(): Promise<HistoryEntry[]> {
   const base = await baseUrl();
   const r = await fetch(`${base}/history`);

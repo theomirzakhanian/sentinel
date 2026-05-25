@@ -1,17 +1,27 @@
 import { motion } from "framer-motion";
-import { ArrowRight, ShieldAlert, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, ShieldAlert, ShieldCheck } from "lucide-react";
 import { ScoreGauge } from "./ScoreGauge";
 import { SignalCard } from "./SignalCard";
+import { AnalysisCard } from "./AnalysisCard";
+import { CodeReviewCard } from "./CodeReviewCard";
 import type { Report, Verdict } from "../lib/types";
 import { STAGE_ORDER, formatBytes, formatDuration, shortHash } from "../lib/format";
 
 interface Props {
   report: Report;
   scoreOverride?: number;  // optional pre-computed weighted score (matches live partialScore)
+  source?: "fresh" | "history";
   onScanAnother: () => void;
+  onBackToHistory?: () => void;
 }
 
-export function VerdictScreen({ report, scoreOverride, onScanAnother }: Props) {
+export function VerdictScreen({
+  report,
+  scoreOverride,
+  source = "fresh",
+  onScanAnother,
+  onBackToHistory,
+}: Props) {
   const verdict = report.final_verdict;
   const score = scoreOverride ?? extractScore(report) ?? 0;
   const signalByStage = Object.fromEntries(report.signals.map((s) => [s.stage, s]));
@@ -39,22 +49,39 @@ export function VerdictScreen({ report, scoreOverride, onScanAnother }: Props) {
               {shortHash(report.sha256)} · {formatBytes(report.size_bytes)} · scanned in {formatDuration(durationSeconds)}
             </p>
           </div>
-          <button
-            onClick={onScanAnother}
-            className="focus-ring group inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#0a0d0f] transition-all duration-base ease-tesla hover:bg-accent-hover"
-            style={{ boxShadow: `0 0 0 1px ${ringClr}33` }}
-          >
-            Scan another file
-            <ArrowRight size={14} className="transition-transform duration-base ease-tesla group-hover:translate-x-0.5" />
-          </button>
+          {source === "history" && onBackToHistory ? (
+            <button
+              onClick={onBackToHistory}
+              className="focus-ring group inline-flex items-center gap-2 rounded-md border border-line bg-surface-2 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-ink-body transition-all duration-base ease-tesla hover:bg-surface-3 hover:text-ink"
+            >
+              <ArrowLeft size={14} className="transition-transform duration-base ease-tesla group-hover:-translate-x-0.5" />
+              Back to History
+            </button>
+          ) : (
+            <button
+              onClick={onScanAnother}
+              className="focus-ring group inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#0a0d0f] transition-all duration-base ease-tesla hover:bg-accent-hover"
+              style={{ boxShadow: `0 0 0 1px ${ringClr}33` }}
+            >
+              Scan another file
+              <ArrowRight size={14} className="transition-transform duration-base ease-tesla group-hover:translate-x-0.5" />
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Signal cards — min-h-0 so flex-1 allows scroll instead of squishing siblings */}
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-8 py-6">
+      {/* Body — min-h-0 so flex-1 allows scroll instead of squishing siblings */}
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-8 py-6">
+        {/* Headline analysis (what is this file) */}
+        <AnalysisCard report={report} />
+
+        {/* Per-stage signal cards */}
         {STAGE_ORDER.map((stage) => (
           <SignalCard key={stage} stage={stage} signal={signalByStage[stage]} />
         ))}
+
+        {/* Decompiled code review */}
+        <CodeReviewCard report={report} />
 
         {/* Reasons / aggregator math */}
         {report.reasons.length > 0 && (

@@ -1,18 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ShieldGlyph } from "./components/ShieldGlyph";
+import { Sidebar, type PageKey } from "./components/Sidebar";
 import { DropZone } from "./components/DropZone";
-import { HistorySidebar } from "./components/HistorySidebar";
 import { ScanInProgress } from "./components/ScanInProgress";
 import { VerdictScreen } from "./components/VerdictScreen";
+import { OverviewPage } from "./components/OverviewPage";
+import { HistoryPage } from "./components/HistoryPage";
+import { SettingsPage } from "./components/SettingsPage";
 import { useScan } from "./lib/useScan";
 import { fetchReport } from "./lib/api";
 import type { Report } from "./lib/types";
 
-type View =
+type VerdictSource = "fresh" | "history";
+
+type ScanView =
   | { kind: "idle" }
   | { kind: "scanning" }
-  | { kind: "verdict"; report: Report; scoreOverride?: number };
+  | { kind: "verdict"; report: Report; scoreOverride?: number; source: VerdictSource };
 
 function buildReportFromScan(state: ReturnType<typeof useScan>["state"]): Report | null {
   if (!state.file || state.finalVerdict == null) return null;
@@ -32,30 +36,36 @@ function buildReportFromScan(state: ReturnType<typeof useScan>["state"]): Report
 }
 
 export default function App() {
-  const [view, setView] = useState<View>({ kind: "idle" });
+  const [page, setPage] = useState<PageKey>("overview");
+  const [scanView, setScanView] = useState<ScanView>({ kind: "idle" });
   const [historyKey, setHistoryKey] = useState(0);
   const { state, begin, cancel, reset } = useScan();
 
-  // Drive view transitions from scan state
+  // Drive scan-view transitions from scan state
   useEffect(() => {
-    if (state.phase === "running" && view.kind === "idle") {
-      setView({ kind: "scanning" });
+    if (state.phase === "running" && scanView.kind === "idle") {
+      setScanView({ kind: "scanning" });
     }
-    if (state.phase === "complete" && view.kind === "scanning") {
+    if (state.phase === "complete" && scanView.kind === "scanning") {
       const report = buildReportFromScan(state);
       if (report) {
-        setView({ kind: "verdict", report, scoreOverride: state.finalScore ?? state.partialScore });
+        setScanView({
+          kind: "verdict",
+          report,
+          scoreOverride: state.finalScore ?? state.partialScore,
+          source: "fresh",
+        });
         setHistoryKey((k) => k + 1);
       }
     }
-    if (state.phase === "error" && view.kind === "scanning") {
-      // surface error as a verdict-ish screen later; for now bounce back to idle
-      setView({ kind: "idle" });
+    if (state.phase === "error" && scanView.kind === "scanning") {
+      setScanView({ kind: "idle" });
     }
-  }, [state, view.kind]);
+  }, [state, scanView.kind]);
 
   const handleFile = useCallback(
     (path: string) => {
+      setPage("scan");
       begin(path);
     },
     [begin],
@@ -63,92 +73,123 @@ export default function App() {
 
   const handleScanAnother = useCallback(() => {
     reset();
-    setView({ kind: "idle" });
+    setScanView({ kind: "idle" });
   }, [reset]);
 
-  const handleHistoryClick = useCallback(async (reportFile: string) => {
-    // reportFile is like "20260523T034550Z_7451fbbf37fe.json" — use the sha prefix
+  const handleOpenReport = useCallback(async (reportFile: string) => {
     const shaPrefix = reportFile.split("_")[1]?.replace(".json", "");
     if (!shaPrefix) return;
     const report = await fetchReport(shaPrefix);
-    if (report) setView({ kind: "verdict", report });
+    if (report) {
+      setScanView({ kind: "verdict", report, source: "history" });
+      setPage("scan");
+    }
   }, []);
 
-  const headerStatus = useMemo(() => {
-    if (view.kind === "scanning") return "Analyzing";
-    if (view.kind === "verdict") return view.report.final_verdict === "BLOCK" ? "Blocked" : "Allowed";
-    return "Ready";
-  }, [view]);
+  const handleBackToHistory = useCallback(() => {
+    reset();
+    setScanView({ kind: "idle" });
+    setPage("history");
+  }, [reset]);
 
   return (
-    <div className="flex h-full w-full flex-col bg-surface-0">
-      <header className="app-titlebar flex h-11 shrink-0 items-center justify-between border-b border-line px-4">
-        <div className="flex items-center gap-2 pl-16 text-ink">
-          <ShieldGlyph size={16} className="text-accent" />
-          <span className="text-xs font-semibold uppercase tracking-[0.18em]">
-            Sentinel
-          </span>
-        </div>
-        <div className="flex items-center gap-2 text-[11px] text-ink-muted">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent" />
-          <span className="uppercase tracking-wider">{headerStatus}</span>
-        </div>
-      </header>
+    <div className="flex h-full w-full bg-surface-0">
+      {/* Title bar — drag region only; no nav (sidebar handles that). */}
+      <div className="app-titlebar pointer-events-none absolute inset-x-0 top-0 z-10 h-9" />
 
-      <main className="flex flex-1 gap-4 overflow-hidden p-4">
-        <HistorySidebar refreshKey={historyKey} onSelect={handleHistoryClick} />
+      <Sidebar
+        current={page}
+        onSelect={(p) => {
+          // Clear a history-sourced verdict when leaving via the sidebar so the
+          // Scan tab returns to its idle drop-zone instead of a stale report.
+          if (
+            scanView.kind === "verdict" &&
+            scanView.source === "history" &&
+            p !== "scan"
+          ) {
+            reset();
+            setScanView({ kind: "idle" });
+          }
+          setPage(p);
+        }}
+      />
 
-        <section className="relative min-w-0 flex-1">
-          <AnimatePresence mode="wait">
-            {view.kind === "idle" && (
-              <motion.div
-                key="idle"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                className="h-full"
-              >
-                <DropZone onFile={handleFile} />
-              </motion.div>
-            )}
-            {view.kind === "scanning" && (
-              <motion.div
-                key="scanning"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-                className="h-full"
-              >
-                <ScanInProgress
-                  state={state}
-                  onCancel={() => {
-                    cancel();
-                    handleScanAnother();
-                  }}
-                />
-              </motion.div>
-            )}
-            {view.kind === "verdict" && (
-              <motion.div
-                key="verdict"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
-                className="card-dark h-full overflow-hidden rounded-xl"
-              >
-                <VerdictScreen
-                  report={view.report}
-                  scoreOverride={view.scoreOverride}
-                  onScanAnother={handleScanAnother}
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </section>
+      <main className="flex-1 overflow-hidden">
+        <AnimatePresence mode="wait">
+          {page === "overview" && (
+            <PageWrapper key="overview">
+              <OverviewPage
+                refreshKey={historyKey}
+                onScanClick={() => setPage("scan")}
+              />
+            </PageWrapper>
+          )}
+
+          {page === "scan" && (
+            <PageWrapper key="scan">
+              <div className="h-full w-full p-4 pt-10">
+                <AnimatePresence mode="wait">
+                  {scanView.kind === "idle" && (
+                    <PageWrapper key="scan-idle">
+                      <DropZone onFile={handleFile} />
+                    </PageWrapper>
+                  )}
+                  {scanView.kind === "scanning" && (
+                    <PageWrapper key="scan-running">
+                      <ScanInProgress
+                        state={state}
+                        onCancel={() => {
+                          cancel();
+                          handleScanAnother();
+                        }}
+                      />
+                    </PageWrapper>
+                  )}
+                  {scanView.kind === "verdict" && (
+                    <PageWrapper key="scan-verdict">
+                      <div className="card-dark h-full overflow-hidden rounded-xl">
+                        <VerdictScreen
+                          report={scanView.report}
+                          scoreOverride={scanView.scoreOverride}
+                          source={scanView.source}
+                          onScanAnother={handleScanAnother}
+                          onBackToHistory={handleBackToHistory}
+                        />
+                      </div>
+                    </PageWrapper>
+                  )}
+                </AnimatePresence>
+              </div>
+            </PageWrapper>
+          )}
+
+          {page === "history" && (
+            <PageWrapper key="history">
+              <HistoryPage refreshKey={historyKey} onOpenReport={handleOpenReport} />
+            </PageWrapper>
+          )}
+
+          {page === "settings" && (
+            <PageWrapper key="settings">
+              <SettingsPage />
+            </PageWrapper>
+          )}
+        </AnimatePresence>
       </main>
     </div>
+  );
+}
+
+function PageWrapper({ children }: { children: React.ReactNode }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -4 }}
+      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+      className="h-full w-full"
+    >
+      {children}
+    </motion.div>
   );
 }

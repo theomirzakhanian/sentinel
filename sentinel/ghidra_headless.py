@@ -86,4 +86,9 @@ def analyze(file_path: Path, *, timeout: float = DEFAULT_TIMEOUT) -> dict:
             )
 
         with dump_path.open() as fh:
-            return json.load(fh)
+            data = json.load(fh)
+        # Stash analyzeHeadless stdout snippets so callers can debug Jython prints
+        # by inspecting result["_analyzer_stdout"] without re-running.
+        if isinstance(data, dict):
+            data["_analyzer_stdout"] = (result.stdout or "")[-4000:]
+        return data

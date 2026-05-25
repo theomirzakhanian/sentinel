@@ -2,6 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Tesla wordmark font — CC-BY-SA 4.0. Bundled at build time so it works offline. */
+@font-face {
+  font-family: "Tesla";
+  src: url("../assets/fonts/TESLA.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 /*
  * Token floor — dark-first Tesla Sentinel Mode aesthetic.
  * Following fantastic/taste-dark-first.md:
@@ -27,10 +36,13 @@
   --color-line: rgba(255, 255, 255, 0.08);
   --color-line-strong: rgba(255, 255, 255, 0.14);
 
-  /* Accent — Tesla electric cyan, desaturated for dark surfaces */
-  --color-accent: oklch(82% 0.13 220);          /* ~#7ed4f3 */
-  --color-accent-hover: oklch(88% 0.13 220);    /* a touch brighter */
-  --color-accent-tint: rgba(126, 212, 243, 0.10);
+  /* Accent — violet, calibrated for dark surfaces */
+  --color-accent: oklch(72% 0.17 290);          /* ~#9b82f5 */
+  --color-accent-hover: oklch(80% 0.17 290);    /* a touch brighter */
+  --color-accent-tint: rgba(155, 130, 245, 0.10);
+  --color-accent-glow: rgba(155, 130, 245, 0.40);
+  --color-accent-grad-start: oklch(60% 0.22 280);
+  --color-accent-grad-end: oklch(72% 0.20 305);
 
   /* Threat colors — alpha-tinted bg + full-saturation fg per taste-dark-first */
   --color-threat-allow: oklch(75% 0.13 152);    /* emerald */
@@ -95,7 +107,7 @@ body {
   outline: none;
   box-shadow:
     0 0 0 2px var(--color-accent),
-    0 0 0 4px rgba(126, 212, 243, 0.20);
+    0 0 0 4px rgba(155, 130, 245, 0.20);
 }
 
 /* Title bar drag region for hiddenInset window */

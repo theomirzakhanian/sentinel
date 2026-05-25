@@ -21,6 +21,14 @@ export default {
           "Menlo",
           "monospace",
         ],
+        // Wordmark — Tesla typeface (locally bundled, CC-BY-SA 4.0).
+        // Tesla's E renders as three free-floating horizontal bars by design.
+        display: [
+          "Tesla",
+          "Iceland",
+          "Inter",
+          "sans-serif",
+        ],
       },
       colors: {
         // Surface ramp — dark-first, oklch deep-but-not-pure-black

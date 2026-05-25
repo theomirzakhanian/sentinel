@@ -1,6 +1,6 @@
 /**
  * Hero stage indicator for the scanning view.
- * - running.default: rotating cyan comet (used for VirusTotal, generic stages)
+ * - running.default: rotating violet comet (used for VirusTotal, generic stages)
  * - running.ai:      three concentric rotating arc trails + glowing core (used for AI deep dive)
  * - allow/block/warn: solid colored disc with check/X, halo burst
  * - skipped:         dashed ring, dim
@@ -54,7 +54,7 @@ function RunningDefault({ size }: { size: number }) {
         className="absolute inset-2 rounded-full"
         style={{
           background:
-            "radial-gradient(circle, rgba(126,212,243,0.22) 0%, rgba(126,212,243,0) 65%)",
+            "radial-gradient(circle, rgba(155,130,245,0.22) 0%, rgba(155,130,245,0) 65%)",
         }}
         animate={{ opacity: [0.55, 0.95, 0.55] }}
         transition={{ duration: 2.1, ease: "easeInOut", repeat: Infinity }}
@@ -62,7 +62,7 @@ function RunningDefault({ size }: { size: number }) {
 
       {/* Static base ring */}
       <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size} className="absolute inset-0">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(126,212,243,0.18)" strokeWidth={stroke} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(155,130,245,0.18)" strokeWidth={stroke} />
       </svg>
 
       {/* Rotating gradient arc */}
@@ -78,7 +78,7 @@ function RunningDefault({ size }: { size: number }) {
             <linearGradient id="rd-arc" x1="0%" y1="0%" x2="100%" y2="0%">
               <stop offset="0%" stopColor="var(--color-accent)" stopOpacity="0" />
               <stop offset="60%" stopColor="var(--color-accent)" stopOpacity="0.85" />
-              <stop offset="95%" stopColor="oklch(95% 0.05 220)" stopOpacity="1" />
+              <stop offset="95%" stopColor="oklch(95% 0.05 290)" stopOpacity="1" />
               <stop offset="100%" stopColor="#ffffff" stopOpacity="1" />
             </linearGradient>
           </defs>
@@ -125,7 +125,7 @@ function RunningAI({ size }: { size: number }) {
         className="absolute inset-0 rounded-full"
         style={{
           background:
-            "radial-gradient(circle, rgba(126,212,243,0.22) 0%, rgba(126,212,243,0) 70%)",
+            "radial-gradient(circle, rgba(155,130,245,0.22) 0%, rgba(155,130,245,0) 70%)",
         }}
         animate={{ opacity: [0.45, 0.95, 0.45], scale: [0.95, 1.05, 0.95] }}
         transition={{ duration: 2.8, ease: "easeInOut", repeat: Infinity }}
@@ -196,7 +196,7 @@ function RunningAI({ size }: { size: number }) {
           height: 10,
           transform: "translate(-50%, -50%)",
           boxShadow:
-            "0 0 14px var(--color-accent), 0 0 28px rgba(126,212,243,0.55), 0 0 48px rgba(126,212,243,0.25)",
+            "0 0 14px var(--color-accent), 0 0 28px rgba(155,130,245,0.55), 0 0 48px rgba(155,130,245,0.25)",
         }}
         animate={{ scale: [0.85, 1.4, 0.85], opacity: [0.75, 1, 0.75] }}
         transition={{ duration: 1.7, ease: "easeInOut", repeat: Infinity }}

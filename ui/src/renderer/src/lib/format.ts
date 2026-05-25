@@ -23,6 +23,17 @@ export function relTime(iso: string | number): string {
   return `${Math.floor(dt / 86_400_000)}d ago`;
 }
 
+export function scanTime(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return `Today, ${time}`;
+  const y = new Date(now);
+  y.setDate(y.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) return `Yesterday, ${time}`;
+  return `${d.toLocaleDateString([], { weekday: "short" })}, ${time}`;
+}
+
 export function shortHash(sha: string): string {
   return `${sha.slice(0, 8)}…${sha.slice(-4)}`;
 }

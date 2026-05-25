@@ -1,5 +1,4 @@
-import { motion } from "framer-motion";
-import { Activity, X } from "lucide-react";
+import { X } from "lucide-react";
 import { ScoreGauge } from "./ScoreGauge";
 import { StageIndicator, type StageStatus } from "./StageIndicator";
 import type { ScanState } from "../lib/useScan";
@@ -34,19 +33,9 @@ export function ScanInProgress({ state, onCancel }: Props) {
     <div className="card-dark flex h-full w-full flex-col overflow-hidden rounded-xl">
       {/* Header strip */}
       <header className="flex shrink-0 items-center justify-between border-b border-line px-6 py-4">
-        <div className="flex items-center gap-3">
-          <motion.span
-            animate={{ opacity: [0.5, 1, 0.5] }}
-            transition={{ duration: 1.8, ease: "easeInOut", repeat: Infinity }}
-            className="inline-block h-1.5 w-1.5 rounded-full bg-accent"
-          />
-          <div className="flex items-center gap-2">
-            <Activity size={14} className="text-accent" />
-            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-ink">
-              Analyzing
-            </span>
-          </div>
-        </div>
+        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-ink">
+          Analyzing
+        </span>
         <button
           onClick={onCancel}
           className="focus-ring inline-flex items-center gap-1.5 rounded-md border border-line bg-surface-2 px-3 py-1.5 text-xs font-medium text-ink-body transition-colors duration-fast ease-tesla hover:bg-surface-3 hover:text-ink"

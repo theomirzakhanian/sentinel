@@ -1,176 +1,155 @@
 # Sentinel
 
-A guilty-until-proven-innocent file scanner that combines VirusTotal's multi-engine
-verdict with AI reasoning over Ghidra-decompiled code. Built as an experimental
-v0 — not production AV.
+An experimental file scanner that treats every binary as guilty until something proves otherwise. Combines VirusTotal, optional Hatching Triage, and an AI that reads Ghidra-decompiled code to figure out what a file actually does.
+
+Not production AV. A weekend-scale v0 that catches real malware and surfaces the AI's reasoning end-to-end, including the decompiled functions it actually read.
 
 ```
-┌──────┐    ┌────────────┐    ┌──────────────────────┐    ┌────────────┐
-│ file │ -> │ VirusTotal │ -> │ AI deep dive         │ -> │ verdict    │
-└──────┘    │ (hash +    │    │ (Ghidra headless +   │    │ (weighted  │
-            │  optional  │    │  Claude reasoning)   │    │  ALLOW or  │
-            │  upload)   │    │                      │    │  BLOCK)    │
-            └────────────┘    └──────────────────────┘    └────────────┘
+file in
+   │
+   ▼
+VirusTotal lookup ──▶ Triage sandbox (optional) ──▶ Ghidra headless + Claude
+                                                        │
+                                                        ▼
+                                              weighted verdict + reasons
 ```
 
-Three signals — VirusTotal aggregate, optional Hatching Triage sandbox, and an AI
-review of Ghidra's decompilation — are combined by a weighted aggregator with a
-configurable BLOCK threshold. Default policy treats any non-ALLOW signal as
-sticky positive evidence and requires affirmative benign evidence to allow.
+## The interesting stage
 
-## Status
+Most AV is signature matching plus some heuristics. Sentinel does the signature part too (VirusTotal aggregates 70+ engines), but the part worth talking about is the third stage.
 
-**Experimental v0.** Catches real ITW samples; surfaces real false-positive
-risks; the architecture is sound but rough. Tested on macOS arm64; cross-platform
-in principle.
+For each scan, Ghidra's `analyzeHeadless` runs on the binary and writes out a JSON dump: imports, strings, and the decompiled C of selected functions. Before any of that gets to Claude, Sentinel computes meta-flags for concerning patterns it can spot mechanically — dynamic API resolution combos (`LoadLibrary` + `GetProcAddress`), the full process-injection primitive set, network vocabulary in strings that doesn't match the filename's apparent purpose. Then the whole package goes to Claude with a prompt that forbids it from explaining away upstream signals as "Go false positives" or "needed by the runtime."
 
-## Architecture
+What comes back is a verdict plus a file description, a malware class (stealer, RAT, backdoor, loader, ransomware, packer...), a named family when one is recognizable, and a list of capabilities the code actually has. The UI shows you the decompiled C of the functions Claude reviewed so you can check its work.
 
-```
-sentinel/                 Python package — the scanner + daemon
-├── stages/
-│   ├── virustotal.py     SHA-256 lookup; optional upload + poll
-│   ├── triage.py         Hatching Triage sandbox (optional)
-│   └── ai_review.py      Wraps the LLM provider, returns Signal
-├── llm/
-│   ├── base.py           LLMProvider interface
-│   └── claude_cli.py     Shells out to `claude -p`, parses verdict JSON
-├── ghidra_headless.py    Wraps Ghidra's analyzeHeadless CLI
-├── ghidra_scripts/
-│   └── sentinel_dump.py  Jython PostScript — dumps imports, strings,
-│                         decompiled functions, meta-flags to JSON
-├── static_inspect.py     binutils fallback when Ghidra is unavailable
-├── verdict.py            Weighted-score aggregator
-├── scanner.py            Pure scan_file() — used by CLI + daemon
-├── cli.py                argparse: scan | benchmark | fetch-malware | serve
-├── benchmark.py          Corpus-mode runner with TPR/FPR metrics
-├── fetch_malware.py      Pulls samples from MalwareBazaar
-└── daemon.py             Flask HTTP + SSE server (backs the UI)
+## Honest limitations (worth saying up front)
 
-ui/                       Electron + Vite + React + TS + Tailwind
-├── src/main/             Main process (spawns daemon, IPC)
-├── src/preload/          contextBridge for daemon URL + file picker
-└── src/renderer/         React UI — drop zone, scan view, verdict view
-```
-
-The AI deep dive has three modes, auto-detected:
-
-1. **`mcp`** — GUI Ghidra with the GhidraMCP plugin exposes a UDS socket. Claude
-   drives `mcp__ghidra__*` tools live.
-2. **`headless`** — `analyzeHeadless` on disk. `sentinel/ghidra_headless.py`
-   shells out and runs `sentinel_dump.py` as a PostScript to extract everything.
-   This is the default working mode.
-3. **`static`** — neither available; fall back to `file`/`strings`/`otool`/`nm`.
+- The bundled CLI for the LLM stage is Claude Code. If you do not have it on your PATH, the AI stage breaks. An Anthropic API provider is sketched but not wired.
+- Anthropic occasionally refuses to analyze malware even with the defensive-context preamble. Sentinel retries and surfaces the error. `SENTINEL_CLAUDE_MODEL=sonnet` usually gets through when Opus does not.
+- Ghidra is slow on big binaries. Anything over about 50 MB takes a couple of minutes per scan. The picker falls back to a binutils-only mode if Ghidra crashes.
+- The Electron app currently launches the Python CLI as a subprocess. Distribution as a single signed installer is a separate piece of work.
 
 ## Setup
 
-### Python scanner
+### Scanner
 
 ```bash
-git clone <this-repo> Sentinel
-cd Sentinel
+git clone https://github.com/theomirzakhanian/sentinel
+cd sentinel
 
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 
 cp .env.example .env
-# fill in VT_API_KEY at minimum
+# fill in VT_API_KEY at minimum; the others are optional
 ```
 
-### Ghidra (for AI deep dive)
+### Ghidra
 
-macOS (Homebrew):
+macOS with Homebrew:
 
 ```bash
 brew install --cask ghidra
 ```
 
-Sentinel auto-detects `analyzeHeadless` at common paths (Homebrew cellar,
-`$GHIDRA_HOME/support/`). If yours is elsewhere, set `GHIDRA_HOME`.
+Sentinel finds `analyzeHeadless` automatically at the standard Homebrew paths. Set `GHIDRA_HOME` if yours lives elsewhere.
 
-### UI (optional — CLI works standalone)
+### UI
 
 ```bash
 cd ui
 npm install
-npm run dev    # opens the Electron window
+npm run dev
 ```
 
-The Electron main process auto-spawns the daemon (`sentinel serve`) on a free
-port and the renderer talks to it via SSE.
+The Electron main process starts `sentinel serve` on a free port and the renderer talks to it via SSE.
 
-## CLI usage
+## CLI
 
 ```bash
-# Scan one file (hash lookup only, no VT upload)
-sentinel scan /path/to/binary
-
-# Scan + upload to VirusTotal if hash is unknown
-sentinel scan --upload /path/to/binary
-
-# Skip stages selectively
-sentinel scan --skip-triage --skip-ai /path/to/binary
-
-# Benchmark a corpus
-sentinel benchmark corpus/bench --labels corpus/bench/labels.json
-
-# Pull recent ITW samples from MalwareBazaar (requires free API key)
-sentinel fetch-malware corpus/malware --limit 10
-
-# Run the local HTTP daemon (used by the UI)
-sentinel serve --host 127.0.0.1 --port 7331
+sentinel scan ./binary                          # default: VT hash lookup only
+sentinel scan --upload ./binary                 # upload to VT if hash is unknown
+sentinel scan --skip-ai ./binary                # fast path: VT only
+sentinel benchmark corpus/ --labels labels.json # batch over a directory
+sentinel fetch-malware corpus/malware --limit 10 # pull recent ITW samples
+sentinel serve                                  # local daemon for the UI
 ```
 
-Exit codes: `0` allow · `1` block · `2` usage error.
+Exit codes: 0 allow, 1 block, 2 usage error.
+
+## Layout
+
+```
+sentinel/
+├── stages/
+│   ├── virustotal.py        SHA-256 lookup + optional upload
+│   ├── triage.py            Hatching Triage submit + poll
+│   └── ai_review.py         Wraps the LLM provider into a Signal
+├── llm/
+│   ├── base.py              Abstract provider interface
+│   └── claude_cli.py        Shells out to `claude -p`, parses JSON verdict
+├── ghidra_headless.py       Wrapper around analyzeHeadless
+├── ghidra_scripts/
+│   └── sentinel_dump.py     Jython postscript: imports, strings, decompiled
+│                            C, meta-flags, Go pclntab name recovery
+├── static_inspect.py        Binutils fallback when Ghidra is unavailable
+├── verdict.py               Weighted-score aggregator
+├── scanner.py               Pure scan_file() used by CLI and daemon
+├── benchmark.py             Corpus runner with TPR/FPR metrics
+├── fetch_malware.py         MalwareBazaar pull
+├── cli.py                   argparse: scan / benchmark / fetch-malware / serve
+└── daemon.py                Flask + SSE for the UI
+
+ui/
+├── src/main/                Electron main (spawns daemon, IPC, app icon)
+├── src/preload/             contextBridge: daemon URL + file picker
+└── src/renderer/            React + Vite + Tailwind
+    ├── App.tsx              Sidebar shell + page router
+    └── components/
+        ├── Sidebar.tsx           Brand, nav, rotating tagline
+        ├── OverviewPage.tsx      Big shield + stats + Quick Scan CTA
+        ├── ScanInProgress.tsx    Live stage view with score gauge
+        ├── VerdictScreen.tsx     Hero verdict + signal cards
+        ├── AnalysisCard.tsx      File description, class badges, capabilities
+        ├── CodeReviewCard.tsx    Meta-flags + decompiled C per function
+        ├── HistoryPage.tsx       Past scans, clickable
+        └── SettingsPage.tsx      Read-only daemon config + .env path
+```
+
+## How verdicts add up
+
+Each stage produces a score in `[-1, +1]` (positive = malicious). The aggregator weights them and BLOCKs if the total clears 0.15.
+
+VirusTotal is weighted 0.40 with detection ratio scaled ×2, and anything below 4% gets suppressed as noise — that one rule alone fixed jq.exe getting blocked because a single engine called it a trojan. AI deep dive carries 0.35, signed by the AI's verdict with confidence as magnitude. Triage carries 0.25.
+
+A clean VT result is mild negative evidence (-0.30) but not enough to override a confident AI BLOCK. That's the whole point: catching FUD malware that VT misses while not over-blocking when one heuristic engine misfires.
+
+## Go binaries get the full treatment
+
+Stripped Go is the hardest case for static AV. Symbols are gone, so picker heuristics fail and you end up decompiling Go's scheduler instead of the user's `main.main`.
+
+Sentinel parses Go's pclntab (the function-name table the runtime uses for stack traces). On a recent test sample claiming to be an image processor, this turned six anonymous `FUN_xxxxxx` decompilations into `main.shellLoop`, `main.uploadFile`, `main.generateImage`, `main.processImage` — instantly making the cover/payload split visible. Handles the Go 1.18+ and 1.20+ pclntab layouts and rebuilds `textStart` from the .text section for PIE binaries.
 
 ## Configuration
 
-Environment variables (set in `.env`):
+Set in `.env`:
 
-| Variable | Required | Notes |
+| Variable | Required | Where to get it |
 |---|---|---|
-| `VT_API_KEY` | yes | https://www.virustotal.com/gui/my-apikey (free) |
-| `TRIAGE_API_KEY` | no | https://tria.ge/account/api (optional, gates the sandbox stage) |
-| `MALWAREBAZAAR_API_KEY` | no | https://bazaar.abuse.ch/account/ (required for `fetch-malware`) |
-| `SENTINEL_CLAUDE_BIN` | no | Path to the `claude` CLI binary (defaults to PATH lookup) |
-| `SENTINEL_CLAUDE_MODEL` | no | Override (`sonnet`, etc.) if Opus refuses on legit malware |
-| `GHIDRA_HOME` | no | Ghidra libexec dir; auto-detected on Homebrew macOS |
-
-## How the verdict is computed
-
-Each signal contributes a score in `[-1, +1]` (positive = malicious). Weighted
-sum exceeding `BLOCK_THRESHOLD = 0.15` blocks. Defaults in `sentinel/verdict.py`:
-
-| Stage | Weight | Notes |
-|---|---|---|
-| VirusTotal | 0.40 | Detection ratio scaled `× 2`; ratios below 4% suppressed as noise (single-engine FPs) |
-| AI deep dive | 0.35 | `±confidence` signed by the AI's ALLOW/BLOCK verdict |
-| Triage | 0.25 | Score/10 if BLOCK; mild negative if ALLOW |
-
-A clean VT result is mild negative evidence (`-0.30`) — it counts against
-blocking, but doesn't override a confident AI BLOCK (the FUD-malware case).
-
-## Limitations
-
-- **Stripped Go binaries**: `main.main` is invisible without symbols. The
-  `ghidra_scripts/sentinel_dump.py` picker has heuristics for this (call-graph
-  walk from entry, suspicious-API caller scan, meta-flags) but cannot reliably
-  read user code in heavily stripped/obfuscated Go.
-- **Large binaries (>50MB)**: Ghidra `analyzeHeadless` can be slow or unstable;
-  Sentinel falls back to `static` mode in that case.
-- **Anthropic API refusals**: Opus occasionally refuses to analyze malware on
-  Usage Policy grounds even with a defensive-research preamble. Sentinel retries
-  and surfaces the error; `SENTINEL_CLAUDE_MODEL=sonnet` is the workaround.
-- **Daemon distribution**: the Electron app currently spawns the Python venv's
-  CLI. Packaging Python + Sentinel as a single distributable is a future task.
+| `VT_API_KEY` | yes | https://www.virustotal.com/gui/my-apikey |
+| `TRIAGE_API_KEY` | no | https://tria.ge/account/api (gates the sandbox stage) |
+| `MALWAREBAZAAR_API_KEY` | no | https://bazaar.abuse.ch/account/ (for `fetch-malware`) |
+| `SENTINEL_CLAUDE_BIN` | no | Defaults to `claude` on PATH |
+| `SENTINEL_CLAUDE_MODEL` | no | Override Opus with `sonnet` if you hit refusals |
+| `GHIDRA_HOME` | no | Auto-detected on macOS Homebrew |
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
 
-## Security
+## Security notes
 
-See [SECURITY.md](SECURITY.md) for disclosure policy and the test-corpus
-warnings (real malware samples in `corpus/` are gitignored — they should never
-be committed).
+See [SECURITY.md](SECURITY.md). The `corpus/` directory is gitignored because it is meant to hold actual malware samples for benchmarking. Do not commit it. Do not put it in iCloud or Dropbox. macOS XProtect may quarantine downloaded samples; strip the attribute with `xattr -dr com.apple.quarantine corpus/malware/` if needed.
+
+`--upload` to VirusTotal makes the sample public. Default is hash lookup only. Decompiled fragments of any scanned file are sent to Anthropic when the AI stage runs; do not scan things you consider private.

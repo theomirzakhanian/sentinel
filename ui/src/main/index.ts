@@ -1,10 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { getDaemonUrl, startDaemon, stopDaemon } from "./daemon.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ICON_PATH = path.join(__dirname, "..", "..", "resources", "icon.png");
 
 let win: BrowserWindow | null = null;
 
@@ -17,6 +18,7 @@ async function createWindow() {
     show: false,
     titleBarStyle: "hiddenInset",
     backgroundColor: "#101113",
+    icon: nativeImage.createFromPath(ICON_PATH),
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.mjs"),
       contextIsolation: true,
@@ -40,6 +42,15 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // macOS Dock icon (BrowserWindow.icon doesn't reach the Dock on Mac)
+  if (process.platform === "darwin" && app.dock) {
+    try {
+      app.dock.setIcon(nativeImage.createFromPath(ICON_PATH));
+    } catch {
+      // ignore — falls back to default
+    }
+  }
+
   ipcMain.handle("daemon:url", async () => {
     if (getDaemonUrl()) return getDaemonUrl();
     try {
