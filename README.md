@@ -4,6 +4,8 @@ An experimental file scanner that treats every binary as guilty until something 
 
 Not production AV. A weekend-scale v0 that catches real malware and surfaces the AI's reasoning end-to-end, including the decompiled functions it actually read.
 
+> **Benchmark:** 49 of 50 correct on a shuffled corpus of 25 real malware (MalwareBazaar) + 25 benign Windows CLI tools, with neutral filenames so the AI could not cheat. 100% recall, one false positive. VirusTotal aggregate alone scored 41 of 50. [Full writeup →](docs/BENCHMARK.md)
+
 ![Sentinel Overview](screenshots/01_overview.png)
 
 ```

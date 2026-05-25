@@ -26,6 +26,9 @@ reports/
 benchmarks/
 samples/
 
+# Private drafts (writeups, notes, anything not ready to publish)
+priv/
+
 # Test corpus — contains REAL MALWARE; never push to a public repo
 corpus/
 eicar.com
