@@ -4,6 +4,8 @@ An experimental file scanner that treats every binary as guilty until something 
 
 Not production AV. A weekend-scale v0 that catches real malware and surfaces the AI's reasoning end-to-end, including the decompiled functions it actually read.
 
+![Sentinel Overview](screenshots/01_overview.png)
+
 ```
 file in
    │
