@@ -4,6 +4,7 @@ import { ScoreGauge } from "./ScoreGauge";
 import { SignalCard } from "./SignalCard";
 import { AnalysisCard } from "./AnalysisCard";
 import { CodeReviewCard } from "./CodeReviewCard";
+import { RelatedSamplesCard } from "./RelatedSamplesCard";
 import type { Report, Verdict } from "../lib/types";
 import { STAGE_ORDER, formatBytes, formatDuration, shortHash } from "../lib/format";
 
@@ -82,6 +83,9 @@ export function VerdictScreen({
 
         {/* Decompiled code review */}
         <CodeReviewCard report={report} />
+
+        {/* SentinelNet — related samples in our local corpus */}
+        <RelatedSamplesCard report={report} />
 
         {/* Reasons / aggregator math */}
         {report.reasons.length > 0 && (

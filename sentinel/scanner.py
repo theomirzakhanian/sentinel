@@ -15,6 +15,7 @@ from sentinel.config import optional
 from sentinel.hashing import hash_file
 from sentinel.llm.claude_cli import ClaudeCLIProvider
 from sentinel.models import Report, Signal
+from sentinel.sentinelnet import store_scan as sentinelnet_store
 from sentinel.stages import ai_review, triage, virustotal
 from sentinel.verdict import aggregate
 
@@ -118,6 +119,28 @@ def scan_file(
 
     final = aggregate(signals)
     completed_at = datetime.now(timezone.utc)
+
+    # SentinelNet: persist the decompiled functions from this scan to the
+    # corpus, tagged with the final verdict + AI's malware classification.
+    # The next scan that sees similar functions will get a meta-signal.
+    try:
+        ai_sig = next((s for s in signals if s.stage == "ai_review"), None)
+        if ai_sig is not None:
+            dump = (ai_sig.evidence or {}).get("ghidra_dump") or {}
+            decompiled = dump.get("decompiled") or {}
+            if decompiled:
+                sentinelnet_store(
+                    file_sha256=hashes["sha256"],
+                    file_name=file_path.name,
+                    verdict=final.verdict,
+                    decompiled=decompiled,
+                    malware_class=(ai_sig.evidence or {}).get("malware_class") or [],
+                    malware_family=(ai_sig.evidence or {}).get("malware_family"),
+                    capabilities=(ai_sig.evidence or {}).get("capabilities") or [],
+                )
+    except Exception:
+        # Storage is best-effort; never fail a scan because the corpus write failed.
+        pass
 
     report = Report(
         file_path=str(file_path),

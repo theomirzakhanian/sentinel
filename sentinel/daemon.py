@@ -121,6 +121,22 @@ def create_app() -> Flask:
     def health():
         return jsonify({"status": "ok", "version": __version__})
 
+    @app.get("/sentinelnet/stats")
+    def sentinelnet_stats():
+        from sentinel.sentinelnet import stats as sn_stats
+        try:
+            return jsonify(sn_stats())
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.get("/sentinelnet/related/<sha256>")
+    def sentinelnet_related(sha256: str):
+        from sentinel.sentinelnet import related_files
+        try:
+            return jsonify({"sha256": sha256, "related": related_files(sha256)})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     @app.get("/settings")
     def get_settings():
         import os

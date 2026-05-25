@@ -59,6 +59,11 @@ def scan(file_path: Path, prior_signals: list[Signal], provider: LLMProvider) ->
     if dump:
         evidence["ghidra_dump"] = dump
 
+    # SentinelNet matches (per-function similarity hits in our in-house corpus)
+    sn_matches = result.get("_sentinelnet_matches")
+    if sn_matches:
+        evidence["sentinelnet_matches"] = sn_matches
+
     return Signal(
         stage="ai_review",
         verdict=verdict,

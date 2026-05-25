@@ -8,6 +8,7 @@ from pathlib import Path
 
 from sentinel.ghidra_headless import analyze as ghidra_headless_analyze, find_analyze_headless
 from sentinel.llm.base import LLMProvider
+from sentinel.sentinelnet import query_scan as sentinelnet_query
 from sentinel.static_inspect import inspect as static_inspect
 
 JSON_FENCE_RE = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
@@ -150,6 +151,10 @@ function_count: {dump[function_count]}  (user-named={dump[function_count_user_na
 
 META FLAGS (auto-computed concerning patterns — TREAT THESE AS HARD EVIDENCE)
 {meta_flags_block}
+
+SENTINELNET MATCHES (in-house corpus — decompiled functions in this file that \
+match functions Sentinel has seen in prior scans, grouped per function):
+{sentinelnet_block}
 
 IMPORTS ({imports_n}):
 {imports_block}
@@ -319,6 +324,34 @@ def _format_meta_flags(flags: list) -> str:
     return "\n".join(rows)
 
 
+def _format_sentinelnet(per_function_matches) -> str:
+    """Format SentinelNet matches per decompiled function for the prompt."""
+    if not per_function_matches:
+        return "  (corpus is empty — this is one of the first scans)"
+    any_hits = any(fm.matches for fm in per_function_matches)
+    if not any_hits:
+        return "  (no matches found — none of this file's functions resemble anything Sentinel has seen)"
+    rows = []
+    for fm in per_function_matches:
+        if not fm.matches:
+            continue
+        block_n = sum(1 for m in fm.matches if m.verdict == "BLOCK")
+        allow_n = sum(1 for m in fm.matches if m.verdict == "ALLOW")
+        rows.append(
+            f"  {fm.function_name} — {len(fm.matches)} match(es) "
+            f"({block_n} BLOCK / {allow_n} ALLOW):"
+        )
+        for m in fm.matches[:5]:
+            fam = f" family={m.malware_family}" if m.malware_family else ""
+            cls = (", ".join(m.malware_class) if m.malware_class else "")
+            cls = f" class=[{cls}]" if cls else ""
+            rows.append(
+                f"    - sim={m.similarity:.2f}  {m.verdict}  "
+                f"{m.file_name}::{m.function_name}{fam}{cls}"
+            )
+    return "\n".join(rows)
+
+
 class ClaudeCLIProvider(LLMProvider):
     def __init__(self, binary: str = "claude", timeout: float = DEFAULT_TIMEOUT,
                  model: str | None = None):
@@ -327,8 +360,11 @@ class ClaudeCLIProvider(LLMProvider):
         self.model = model  # e.g. "sonnet" or full id; None = CLI default
 
     def review(self, *, file_path: Path, context: str) -> dict:
+        from sentinel.hashing import hash_file
         mode = get_ghidra_mode()
         dump: dict | None = None
+        sn_matches = []
+        self_sha = hash_file(file_path)["sha256"]
 
         if mode == MODE_MCP:
             prompt = GHIDRA_MCP_PROMPT.format(path=str(file_path), context=context)
@@ -344,6 +380,15 @@ class ClaudeCLIProvider(LLMProvider):
                 )
                 mode = MODE_STATIC
             if dump is not None:
+                # Query SentinelNet for each decompiled function. Exclude the
+                # file itself (by sha) so re-scans don't trivially match self.
+                try:
+                    sn_matches = sentinelnet_query(
+                        dump.get("decompiled", {}),
+                        exclude_sha256=self_sha,
+                    )
+                except Exception:
+                    sn_matches = []
                 prompt = GHIDRA_HEADLESS_PROMPT.format(
                     path=str(file_path),
                     context=context,
@@ -360,6 +405,7 @@ class ClaudeCLIProvider(LLMProvider):
                     decompiled_names_json=json.dumps(dump.get("decompiled_names", [])),
                     decompiled_block=_format_decompiled(dump.get("decompiled", {})),
                     meta_flags_block=_format_meta_flags(dump.get("meta_flags", [])),
+                    sentinelnet_block=_format_sentinelnet(sn_matches),
                 )
         else:
             static = static_inspect(file_path)
@@ -389,6 +435,26 @@ class ClaudeCLIProvider(LLMProvider):
                 "language_id": dump.get("language_id"),
                 "compiler_spec_id": dump.get("compiler_spec_id"),
             }
+        # SentinelNet matches (serializable subset) so the scanner can store
+        # to DB after the verdict + the UI can render the Related Samples card.
+        verdict["_sentinelnet_matches"] = [
+            {
+                "function_name": fm.function_name,
+                "matches": [
+                    {
+                        "file_sha256": m.file_sha256,
+                        "file_name": m.file_name,
+                        "function_name": m.function_name,
+                        "verdict": m.verdict,
+                        "similarity": m.similarity,
+                        "malware_class": m.malware_class,
+                        "malware_family": m.malware_family,
+                    }
+                    for m in fm.matches
+                ],
+            }
+            for fm in sn_matches
+        ]
         return verdict
 
     def _invoke_with_retry(self, prompt: str, *, max_retries: int = 2) -> dict:
